@@ -1,0 +1,27 @@
+:root{
+  --primary:#0ea5e9; /* κυανό */
+  --accent:#22c55e;  /* πράσινο */
+  --ink:#111827;     /* σκούρο γκρι */
+}
+
+body{background:#f7f8fc;color:#1f2937}
+.navbar{backdrop-filter:saturate(140%) blur(6px)}
+.navbar .nav-link{opacity:.9}
+.navbar .nav-link:hover{opacity:1}
+
+.btn{border-radius:999px}
+.btn-primary{background:var(--primary);border-color:var(--primary)}
+.btn-success{background:var(--accent);border-color:var(--accent)}
+
+.card-product{border:0;border-radius:1rem;overflow:hidden;box-shadow:0 6px 20px rgba(17,24,39,.06);transition:.25s}
+.card-product:hover{transform:translateY(-4px);box-shadow:0 10px 28px rgba(17,24,39,.12)}
+.card-product img{object-fit:cover;height:220px}
+.card-product .price{font-weight:800;color:#0f172a}
+.badge-category{background:var(--primary);color:#fff;font-weight:600}
+
+.form-control:focus,.form-select:focus{
+  box-shadow:0 0 0 .25rem rgba(14,165,233,.2);border-color:var(--primary)
+}
+
+footer{background:linear-gradient(180deg,#0f172a,#111827);color:#fff}
+footer a{text-decoration:none}
