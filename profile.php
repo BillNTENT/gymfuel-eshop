@@ -1,157 +1,65 @@
 <?php
-// my_files/profile.php
-session_start();
-require_once __DIR__ . '/db_connect.php';
-require_once __DIR__ . '/header.php';
+/**
+ * admin/profile.php
+ *
+ * Μικρό wrapper ώστε τα admin links προς /admin/profile.php
+ * να σε ανακατευθύνουν στο πραγματικό προφίλ χρήστη (/my_files/profile.php).
+ * Περιλαμβάνει έλεγχο σύνδεσης και ασφαλή fallback όταν έχουν σταλεί headers.
+ */
 
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
-    exit;
+declare(strict_types=1);
+
+// Ξεκίνα session με ασφάλεια
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
 }
 
-$user_id = (int)$_SESSION['user_id'];
-
-/** Helper: έλεγχος αν υπάρχει στήλη στον τρέχοντα schema */
-function columnExists(PDO $pdo, string $table, string $col): bool {
-    $sql = "SELECT COUNT(*) 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-              AND TABLE_NAME = ? 
-              AND COLUMN_NAME = ?";
-    $st = $pdo->prepare($sql);
-    $st->execute([$table, $col]);
-    return (bool)$st->fetchColumn();
+// Προαιρετικό: φόρτωσε ρυθμίσεις/DB αν τις χρειαστείς στο μέλλον
+$configPath = dirname(__DIR__) . '/config.php';
+if (is_file($configPath)) {
+    require_once $configPath; // δεν απαιτείται για την απλή ανακατεύθυνση, αλλά δεν βλάπτει
 }
 
-/** Επιλογή στήλης ημερομηνίας παραγγελίας */
-$orderDateCol = null;
-if (columnExists($pdo, 'orders', 'order_date')) {
-    $orderDateCol = 'order_date';
-} elseif (columnExists($pdo, 'orders', 'created_at')) {
-    $orderDateCol = 'created_at';
-}
-
-// Φέρε στοιχεία χρήστη
-$stUser = $pdo->prepare("SELECT id, name, email, address FROM users WHERE id = ?");
-$stUser->execute([$user_id]);
-$user = $stUser->fetch();
-if (!$user) {
-    echo "<div class='container mt-4 alert alert-danger'>Ο χρήστης δεν βρέθηκε.</div>";
-    require_once __DIR__ . '/footer.php';
-    exit;
-}
-
-/** -------- ΕΠΕΞΕΡΓΑΣΙΑ RATING -------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['rating'], $_POST['product_id'])) {
-    $rating     = (int)$_POST['rating'];
-    $product_id = (int)$_POST['product_id'];
-
-    // Επιτρέπουμε rating μόνο αν το έχει αγοράσει
-    $check = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM orders o
-        JOIN order_items oi ON o.id = oi.order_id
-        WHERE o.user_id = ? AND oi.product_id = ?
-    ");
-    $check->execute([$user_id, $product_id]);
-    $hasBought = (int)$check->fetchColumn();
-
-    if ($hasBought > 0 && $rating >= 1 && $rating <= 5) {
-        // αν δεν υπάρχει ο πίνακας ratings, θα πρέπει να τον δημιουργήσεις (δες σημείωση στο τέλος)
-        $ins = $pdo->prepare("
-            INSERT INTO ratings (user_id, product_id, rating)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE rating = VALUES(rating)
-        ");
-        try {
-            $ins->execute([$user_id, $product_id, $rating]);
-            $msg = "Η αξιολόγηση καταχωρήθηκε!";
-        } catch (Throwable $e) {
-            $msg = "Σφάλμα κατά την καταχώρηση αξιολόγησης: " . htmlspecialchars($e->getMessage());
-        }
-    } else {
-        $msg = "Δεν μπορείτε να αξιολογήσετε προϊόν που δεν έχετε αγοράσει.";
+// Αν δεν είναι συνδεδεμένος χρήστης, στείλ’ τον στη σελίδα σύνδεσης (προσαρμόσε αν έχεις άλλο path)
+if (empty($_SESSION['user']) || empty($_SESSION['user']['id'])) {
+    $loginUrl = '../login.php';
+    if (!headers_sent()) {
+        header('Location: ' . $loginUrl);
+        exit;
     }
+    // Fallback αν έχουν σταλεί headers
+    echo '<!doctype html><html lang="el"><meta charset="utf-8"><title>Σύνδεση απαιτείται</title>';
+    echo '<p>Πρέπει να συνδεθείς για να δεις το προφίλ σου.</p>';
+    echo '<p><a href="' . htmlspecialchars($loginUrl, ENT_QUOTES, 'UTF-8') . '">Μετάβαση στη σύνδεση</a></p>';
+    echo '</html>';
+    exit;
 }
 
-/** -------- ΙΣΤΟΡΙΚΟ ΠΑΡΑΓΓΕΛΙΩΝ -------- */
-/* Δυναμικά φτιάχνουμε το SELECT για την ημερομηνία */
-$dateSelect = $orderDateCol ? ("o.`{$orderDateCol}` AS order_datetime") : ("NULL AS order_datetime");
+// Στόχος: το πραγματικό προφίλ χρήστη εκτός admin
+$profileUrl = '../profile.php';
 
-$sqlOrders = "
-    SELECT 
-        o.id AS order_id,
-        {$dateSelect},
-        p.id AS product_id,
-        p.name AS product_name,
-        oi.quantity
-    FROM orders o
-    JOIN order_items oi ON o.id = oi.order_id
-    JOIN products p     ON oi.product_id = p.id
-    WHERE o.user_id = ?
-    ORDER BY " . ($orderDateCol ? "o.`{$orderDateCol}` DESC" : "o.id DESC");
+// Κάνε ανακατεύθυνση (προτιμάται)
+if (!headers_sent()) {
+    header('Location: ' . $profileUrl);
+    exit;
+}
 
-$stOrders = $pdo->prepare($sqlOrders);
-$stOrders->execute([$user_id]);
-$orders = $stOrders->fetchAll();
+// Fallback αν έχουν σταλεί ήδη headers
 ?>
-<main class="container mt-4">
-    <h2>Το Προφίλ μου</h2>
-
-    <?php if (!empty($msg)): ?>
-        <div class="alert alert-info"><?= htmlspecialchars($msg) ?></div>
-    <?php endif; ?>
-
-    <div class="card mb-4">
-        <div class="card-body">
-            <p class="mb-1"><strong>Όνομα:</strong> <?= htmlspecialchars($user['name']) ?></p>
-            <p class="mb-1"><strong>Email:</strong> <?= htmlspecialchars($user['email']) ?></p>
-            <p class="mb-0"><strong>Διεύθυνση:</strong> <?= htmlspecialchars($user['address']) ?></p>
-        </div>
-        <div class="card-footer bg-light">
-            <a class="btn btn-primary" href="edit_profile.php">Επεξεργασία Προφίλ</a>
-        </div>
-    </div>
-
-    <h3>Ιστορικό Παραγγελιών</h3>
-    <?php if ($orders): ?>
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Ημερομηνία</th>
-                        <th>Προϊόν</th>
-                        <th>Ποσ.</th>
-                        <th>Rating</th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($orders as $row): ?>
-                    <tr>
-                        <td>#<?= (int)$row['order_id'] ?></td>
-                        <td><?= $row['order_datetime'] ? htmlspecialchars($row['order_datetime']) : '—' ?></td>
-                        <td><?= htmlspecialchars($row['product_name']) ?></td>
-                        <td><?= (int)$row['quantity'] ?></td>
-                        <td>
-                            <form method="post" class="d-flex gap-2">
-                                <input type="hidden" name="product_id" value="<?= (int)$row['product_id'] ?>">
-                                <select name="rating" class="form-select form-select-sm" required>
-                                    <option value="">—</option>
-                                    <?php for ($i=1; $i<=5; $i++): ?>
-                                        <option value="<?= $i ?>"><?= $i ?> ★</option>
-                                    <?php endfor; ?>
-                                </select>
-                                <button class="btn btn-sm btn-success" type="submit">OK</button>
-                            </form>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    <?php else: ?>
-        <p>Δεν βρέθηκαν παραγγελίες.</p>
-    <?php endif; ?>
-</main>
-<?php require_once __DIR__ . '/footer.php'; ?>
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <title>Το προφίλ μου</title>
+  <meta http-equiv="refresh" content="0; url=<?php echo htmlspecialchars($profileUrl, ENT_QUOTES, 'UTF-8'); ?>">
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:2rem;color:#222}
+    a{color:#0a7; text-decoration:none}
+    a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <p>Μεταφορά στο προφίλ… Αν δεν γίνει αυτόματα, πάτησε εδώ:
+     <a href="<?php echo htmlspecialchars($profileUrl, ENT_QUOTES, 'UTF-8'); ?>">Το προφίλ μου</a></p>
+</body>
+</html>
